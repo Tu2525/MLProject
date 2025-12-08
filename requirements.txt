@@ -1,0 +1,9 @@
+torch
+torchvision
+pandas
+pillow
+spacy
+fastapi
+uvicorn
+tqdm
+python-multipart
