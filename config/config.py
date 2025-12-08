@@ -10,15 +10,16 @@ class Config:
     LOG_DIR = os.path.join(ROOT_DIR, 'logs')
 
     # Hyperparameters
-    BATCH_SIZE = 32
+    BATCH_SIZE = 128  # Increased from 32 to utilize 16GB VRAM
     LEARNING_RATE = 3e-4
-    NUM_EPOCHS = 10
+    NUM_EPOCHS = 30
     EMBED_SIZE = 256
     HIDDEN_SIZE = 256
     NUM_LAYERS = 1
+    NUM_WORKERS = 8  # Increased to 8 for i7 10850H
     
     # Image Preprocessing
-    IMAGE_SIZE = (224, 224)
+    IMAGE_SIZE = (299, 299)
     
     # Device
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

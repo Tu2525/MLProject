@@ -1,3 +1,10 @@
+import os
+import sys
+
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from fastapi import FastAPI, UploadFile, File
 from PIL import Image
 import io
@@ -6,6 +13,11 @@ from src.models.model import CNNtoRNN
 from src.preprocessing.transforms import get_transforms, Vocabulary
 from config.config import config
 import pandas as pd
+import time
+import logging
+
+# configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 app = FastAPI(title="Image Captioning API")
 
@@ -38,14 +50,27 @@ transform = get_transforms(config.IMAGE_SIZE)
 
 @app.post("/predict")
 async def predict_caption(file: UploadFile = File(...)):
+    start_ts = time.time()
     image_data = await file.read()
-    image = Image.open(io.BytesIO(image_data)).convert("RGB")
-    
+    file_size = len(image_data)
+    logging.info(f"Received file: filename={file.filename} size={file_size} bytes")
+
+    try:
+        image = Image.open(io.BytesIO(image_data)).convert("RGB")
+    except Exception as e:
+        logging.exception("Failed to open image")
+        return {"error": "Failed to open image. Make sure a valid image file is uploaded."}
+
     image_tensor = transform(image).unsqueeze(0).to(config.DEVICE)
-    
-    caption = model.caption_image(image_tensor.squeeze(0), vocab)
-    
-    return {"caption": " ".join(caption)}
+
+    # Do not squeeze the batch dimension — caption_image expects a batched tensor
+    caption_tokens = model.caption_image(image_tensor, vocab)
+    caption_text = " ".join(caption_tokens)
+
+    elapsed = time.time() - start_ts
+    logging.info(f"Processed file in {elapsed:.3f}s, caption_length={len(caption_tokens)}")
+
+    return {"caption": caption_text, "processing_time_s": round(elapsed, 3)}
 
 @app.get("/")
 def root():

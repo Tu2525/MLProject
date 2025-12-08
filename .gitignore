@@ -1,6 +1,15 @@
 /Images
+/Images/*
 
 .venv
 
+.gitignore
+
+
 captions.txt
 
+
+__pycache__/
+**/__pycache__/
+
+/models

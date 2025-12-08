@@ -19,12 +19,19 @@ class FlickrDataset(Dataset):
         # Initialize vocabulary and build it
         self.vocab = Vocabulary(freq_threshold)
         self.vocab.build_vocabulary(self.captions.tolist())
+        
+        # Optimization: Pre-numericalize captions to save CPU time during training
+        self.numericalized_captions = []
+        for caption in self.captions:
+            numericalized_caption = [self.vocab.stoi["<SOS>"]]
+            numericalized_caption += self.vocab.numericalize(caption)
+            numericalized_caption.append(self.vocab.stoi["<EOS>"])
+            self.numericalized_captions.append(torch.tensor(numericalized_caption))
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, index):
-        caption = self.captions[index]
         img_id = self.imgs[index]
         img_path = os.path.join(self.root_dir, img_id)
         
@@ -33,16 +40,12 @@ class FlickrDataset(Dataset):
         except FileNotFoundError:
             # Handle missing images gracefully, maybe return a dummy or skip
             # For simplicity, let's create a black image if missing
-            img = Image.new('RGB', (224, 224), color='black')
+            img = Image.new('RGB', (299, 299), color='black')
 
         if self.transform is not None:
             img = self.transform(img)
 
-        numericalized_caption = [self.vocab.stoi["<SOS>"]]
-        numericalized_caption += self.vocab.numericalize(caption)
-        numericalized_caption.append(self.vocab.stoi["<EOS>"])
-
-        return img, torch.tensor(numericalized_caption)
+        return img, self.numericalized_captions[index]
 
 class MyCollate:
     def __init__(self, pad_idx):
@@ -56,7 +59,7 @@ class MyCollate:
 
         return imgs, targets
 
-def get_loaders(root_folder, annotation_file, transform, batch_size=32, num_workers=0, shuffle=True, pin_memory=True, val_split=0.2):
+def get_loaders(root_folder, annotation_file, transform, batch_size=32, num_workers=4, shuffle=True, pin_memory=True, val_split=0.2):
     dataset = FlickrDataset(root_folder, annotation_file, transform=transform)
     pad_idx = dataset.vocab.stoi["<PAD>"]
 

@@ -1,5 +1,6 @@
 import argparse
 import uvicorn
+import torch  # Added import
 from src.data.dataset import get_loaders
 from src.models.model import CNNtoRNN
 from src.training.trainer import train
@@ -14,6 +15,7 @@ def run_training():
         config.CAPTIONS_FILE,
         transform=transform,
         batch_size=config.BATCH_SIZE,
+        num_workers=config.NUM_WORKERS,
         val_split=config.VAL_SPLIT
     )
 
@@ -31,6 +33,11 @@ def run_api():
     uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True)
 
 if __name__ == "__main__":
+    # Print device info only once in the main process
+    print(f"Using device: {config.DEVICE}")
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+
     parser = argparse.ArgumentParser(description="Image Captioning Project")
     parser.add_argument("--mode", type=str, default="train", choices=["train", "api"], help="Mode: train or api")
     

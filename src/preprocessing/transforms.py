@@ -4,12 +4,10 @@ from collections import Counter
 from torchvision import transforms
 from PIL import Image
 
-# Ensure spacy english model is downloaded: python -m spacy download en_core_web_sm
 try:
     spacy_eng = spacy.load("en_core_web_sm")
 except:
     print("Spacy model not found. Please run: python -m spacy download en_core_web_sm")
-    # Fallback or exit? For now let's assume user will install it.
     pass
 
 class Vocabulary:
@@ -23,12 +21,17 @@ class Vocabulary:
 
     @staticmethod
     def tokenizer_eng(text):
+        # Optimization: Use simple split if spacy is too slow, or keep spacy if accuracy is needed.
+        # For speed, let's switch to a simpler regex or basic split if spacy is the bottleneck.
+        # But for now, let's keep spacy but ensure we don't reload it.
+        # Alternatively, we can use a faster tokenizer like 'en_core_web_sm' with disable=['parser', 'ner']
         return [tok.text.lower() for tok in spacy_eng.tokenizer(text)]
 
     def build_vocabulary(self, sentence_list):
         frequencies = Counter()
         idx = 4
-
+        
+        # Optimization: Pre-tokenize all sentences once if possible, but for large datasets do it iteratively
         for sentence in sentence_list:
             for word in self.tokenizer_eng(sentence):
                 frequencies[word] += 1

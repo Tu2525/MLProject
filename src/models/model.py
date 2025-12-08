@@ -6,13 +6,28 @@ class EncoderCNN(nn.Module):
     def __init__(self, embed_size, train_CNN=False):
         super(EncoderCNN, self).__init__()
         self.train_CNN = train_CNN
-        self.inception = models.inception_v3(pretrained=True, aux_logits=False)
+        self.inception = models.inception_v3(pretrained=True, aux_logits=True)
         self.inception.fc = nn.Linear(self.inception.fc.in_features, embed_size)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.5)
+        
+        # Freeze Inception weights if we are not fine-tuning
+        if not self.train_CNN:
+            for name, param in self.inception.named_parameters():
+                if "fc.weight" in name or "fc.bias" in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
 
     def forward(self, images):
         features = self.inception(images)
+        
+        # Inception v3 returns (logits, aux_logits) during training
+        if hasattr(features, 'logits'):
+            features = features.logits
+        elif isinstance(features, tuple):
+            features = features[0]
+            
         return self.dropout(self.relu(features))
 
 class DecoderRNN(nn.Module):
