@@ -16,7 +16,8 @@ def run_training():
         transform=transform,
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
-        val_split=config.VAL_SPLIT
+        val_split=config.VAL_SPLIT,
+        pin_memory=config.PIN_MEMORY
     )
 
     model = CNNtoRNN(
@@ -37,6 +38,7 @@ if __name__ == "__main__":
     print(f"Using device: {config.DEVICE}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
+        torch.backends.cudnn.benchmark = True  # Enable cuDNN benchmark for speed
 
     parser = argparse.ArgumentParser(description="Image Captioning Project")
     parser.add_argument("--mode", type=str, default="train", choices=["train", "api"], help="Mode: train or api")
@@ -44,6 +46,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.mode == "train":
+        torch.cuda.empty_cache() # Clear VRAM before training
         run_training()
     elif args.mode == "api":
         run_api()

@@ -76,6 +76,8 @@ def get_loaders(root_folder, annotation_file, transform, batch_size=32, num_work
         shuffle=shuffle,
         pin_memory=pin_memory,
         collate_fn=MyCollate(pad_idx=pad_idx),
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
     
     val_loader = DataLoader(
@@ -85,6 +87,8 @@ def get_loaders(root_folder, annotation_file, transform, batch_size=32, num_work
         shuffle=False,
         pin_memory=pin_memory,
         collate_fn=MyCollate(pad_idx=pad_idx),
+        persistent_workers=False, # Disable persistent workers for validation to free resources
+        prefetch_factor=2 if num_workers > 0 else None
     )
 
     return train_loader, val_loader, dataset
