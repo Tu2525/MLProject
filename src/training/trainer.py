@@ -4,6 +4,66 @@ import torch.optim as optim
 from tqdm import tqdm
 from src.utils.utils import save_checkpoint, load_checkpoint, print_examples, plot_loss_curves
 import os
+try:
+    from nltk.translate.bleu_score import corpus_bleu
+except ImportError:
+    print("NLTK not installed. Please run: pip install nltk")
+    corpus_bleu = None
+
+def print_bleu_score(data_loader, model, dataset, device):
+    if corpus_bleu is None:
+        print("Skipping BLEU score calculation (NLTK not found).")
+        return
+
+    print("Calculating BLEU score on validation set (subset)...")
+    model.eval()
+    references = []
+    hypotheses = []
+    
+    # Check on a subset (e.g. first 100 examples) to save time
+    num_samples = 0
+    max_samples = 100 
+    
+    with torch.no_grad():
+        for idx, (imgs, captions) in enumerate(data_loader):
+            imgs = imgs.to(device)
+            captions = captions.to(device)
+            
+            # captions shape: (seq_len, batch_size)
+            
+            for i in range(imgs.shape[0]):
+                if num_samples >= max_samples:
+                    break
+                    
+                img = imgs[i]
+                # Generate prediction
+                # caption_image expects (1, 3, 299, 299)
+                prediction = model.caption_image(img.unsqueeze(0), dataset.vocab)
+                
+                # Clean prediction (remove <SOS>, <EOS> if present - caption_image handles EOS but maybe not SOS)
+                # caption_image returns words.
+                
+                # Get target
+                # captions[:, i] is the target caption indices
+                target_indices = captions[:, i]
+                target_caption = []
+                for idx in target_indices:
+                    word = dataset.vocab.itos[idx.item()]
+                    if word == "<EOS>":
+                        break
+                    if word != "<SOS>" and word != "<PAD>":
+                        target_caption.append(word)
+                
+                references.append([target_caption])
+                hypotheses.append(prediction)
+                num_samples += 1
+            
+            if num_samples >= max_samples:
+                break
+
+    score = corpus_bleu(references, hypotheses)
+    print(f"BLEU-4: {score * 100:.2f}")
+    model.train()
 
 def train_one_epoch(loader, model, optimizer, criterion, device, vocab):
     model.train()
@@ -11,6 +71,9 @@ def train_one_epoch(loader, model, optimizer, criterion, device, vocab):
     total_loss = 0
     
     scaler = torch.amp.GradScaler('cuda')
+    
+    # Pre-fetch first batch to warm up
+    # iter(loader) triggers worker startup
     
     for idx, (imgs, captions) in enumerate(loop):
         imgs = imgs.to(device)
@@ -50,7 +113,11 @@ def evaluate(loader, model, criterion, device):
 
 def train(config, train_loader, val_loader, dataset, model):
     criterion = nn.CrossEntropyLoss(ignore_index=dataset.vocab.stoi["<PAD>"])
-    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+    # Only optimize parameters that require gradients (i.e., ignore frozen Inception layers)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.LEARNING_RATE)
+    
+    # Learning Rate Scheduler: Reduce LR by factor of 0.5 if validation loss doesn't improve for 2 epochs
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.5)
 
     model.to(config.DEVICE)
     
@@ -59,8 +126,23 @@ def train(config, train_loader, val_loader, dataset, model):
     if os.path.exists(config.MODEL_SAVE_PATH):
         print(f"Loading existing checkpoint from {config.MODEL_SAVE_PATH}")
         checkpoint = torch.load(config.MODEL_SAVE_PATH, map_location=config.DEVICE)
-        model.load_state_dict(checkpoint["state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
+        
+        # Load model weights with strict=False to handle architecture changes (e.g. added BatchNorm)
+        try:
+            model.load_state_dict(checkpoint["state_dict"], strict=False)
+            print("Model weights loaded (some new layers may be initialized fresh).")
+        except RuntimeError as e:
+            print(f"Warning: Could not load model weights: {e}")
+
+        # Try to load optimizer state, but reset if architecture changed
+        try:
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            print("Optimizer state loaded.")
+        except ValueError:
+            print("Warning: Optimizer state does not match new model architecture. Starting with fresh optimizer.")
+        except Exception as e:
+            print(f"Warning: Could not load optimizer state: {e}. Starting with fresh optimizer.")
+            
         # Note: We don't have epoch saved in checkpoint currently, so we start from 0 or assume continuation.
         # Ideally, save epoch in checkpoint. For now, let's just load weights and train for NUM_EPOCHS more.
         print("Resuming training with loaded weights...")
@@ -78,6 +160,12 @@ def train(config, train_loader, val_loader, dataset, model):
         train_loss = train_one_epoch(train_loader, model, optimizer, criterion, config.DEVICE, dataset.vocab)
         
         val_loss = evaluate(val_loader, model, criterion, config.DEVICE)
+        
+        # Calculate BLEU score
+        print_bleu_score(val_loader, model, dataset, config.DEVICE)
+        
+        # Step the scheduler
+        scheduler.step(val_loss)
         
         train_losses.append(train_loss)
         val_losses.append(val_loss)

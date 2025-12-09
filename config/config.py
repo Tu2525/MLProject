@@ -1,5 +1,7 @@
-import torch
 import os
+# Set allocator config immediately to ensure it applies before CUDA init
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+import torch
 
 class Config:
     # Paths
@@ -15,15 +17,18 @@ class Config:
     MODEL_SAVE_PATH = os.path.join(ROOT_DIR, 'models', 'image_captioning_model.pth')
     LOG_DIR = os.path.join(ROOT_DIR, 'logs')
 
+    PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"  
+    
     # Hyperparameters
-    BATCH_SIZE = 320  # Reduced to 192 to fit within Windows Page File limits
+    BATCH_SIZE = 512  
     LEARNING_RATE = 3e-4
-    NUM_EPOCHS = 30
-    EMBED_SIZE = 256
+    NUM_EPOCHS = 100
+    EMBED_SIZE = 256 
     HIDDEN_SIZE = 256
-    NUM_LAYERS = 1
-    NUM_WORKERS = 2  # Reduced to 2. This is the stability sweet spot for Windows.
-    PIN_MEMORY = True  # Disabled to reduce physical RAM usage and prevent paging errors
+    NUM_LAYERS = 1 
+    NUM_WORKERS = 2  
+    PIN_MEMORY = True
+    CACHE_IMAGES = True # Enable in-memory caching to bypass slow NTFS reads
     
     # Image Preprocessing
     IMAGE_SIZE = (299, 299)

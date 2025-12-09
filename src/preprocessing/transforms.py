@@ -49,9 +49,18 @@ class Vocabulary:
             for token in tokenized_text
         ]
 
-def get_transforms(image_size):
-    return transforms.Compose([
-        transforms.Resize(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
+def get_transforms(image_size, train=True):
+    if train:
+        return transforms.Compose([
+            # transforms.Resize(image_size), # Disabled since images are pre-resized
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])
+    else:
+        return transforms.Compose([
+            # transforms.Resize(image_size), # Disabled since images are pre-resized
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])

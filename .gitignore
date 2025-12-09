@@ -2,6 +2,7 @@
 /Images/*
 
 .venv
+.venv_linux
 
 .gitignore
 
@@ -14,3 +15,5 @@ __pycache__/
 
 /models
 /Images_Resized
+
+.vscode

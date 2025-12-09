@@ -49,3 +49,28 @@ def print_examples(model, device, dataset):
     # For now just a placeholder
     print("Example generation not implemented yet")
     model.train()
+
+def evaluate_model(model, dataset, image_path, device, max_length=50):
+    """
+    Evaluates the model on a single image and returns the generated caption.
+    """
+    model.eval()
+    transform = transforms.Compose(
+        [
+            transforms.Resize((299, 299)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
+    )
+    
+    try:
+        img = Image.open(image_path).convert("RGB")
+        img_tensor = transform(img).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            caption = model.caption_image(img_tensor, dataset.vocab, max_length=max_length)
+            
+        return " ".join(caption)
+    except Exception as e:
+        return f"Error evaluating image: {e}"
+
