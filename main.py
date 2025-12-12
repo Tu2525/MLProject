@@ -1,19 +1,18 @@
 import argparse
 import uvicorn
 import torch  # Added import
-import os
-from src.data.dataset import get_loaders
-from src.models.model import CNNtoRNN
-from src.training.trainer import train, print_bleu_score
-from src.preprocessing.transforms import get_transforms
 from config.config import config
 
 def run_training():
     print("Starting Training...")
+    from src.preprocessing.transforms import get_transforms
+    from src.data.dataset import get_loaders
+    from src.models.model import CNNtoRNN
+    from src.training.trainer import train
+
     train_transform = get_transforms(config.IMAGE_SIZE, train=True)
     val_transform = get_transforms(config.IMAGE_SIZE, train=False)
-    
-    
+
     train_loader, val_loader, dataset = get_loaders(
         config.DATA_DIR,
         config.CAPTIONS_FILE,
@@ -65,10 +64,15 @@ if __name__ == "__main__":
     elif args.mode == "api":
         run_api()
     elif args.mode == "eval":
+        from src.preprocessing.transforms import get_transforms
+        from src.data.dataset import get_loaders
+        from src.models.model import CNNtoRNN
+        from src.training.trainer import print_bleu_score
+
         # Load dataset and transforms
         print("Loading dataset...")
         transform = get_transforms(config.IMAGE_SIZE, train=False)
-        
+
         # We need the validation loader to get validation images
         train_loader, val_loader, dataset = get_loaders(
             config.DATA_DIR,
@@ -78,7 +82,7 @@ if __name__ == "__main__":
             batch_size=1,
             num_workers=0
         )
-            
+
         print(f"Loading model from {args.model_path}...")
         # Use args to initialize model, allowing override of config defaults
         model = CNNtoRNN(
@@ -87,14 +91,14 @@ if __name__ == "__main__":
             vocab_size=len(dataset.vocab),
             num_layers=args.num_layers
         ).to(config.DEVICE)
-        
+
         try:
             checkpoint = torch.load(args.model_path, map_location=config.DEVICE)
             model.load_state_dict(checkpoint["state_dict"])
         except Exception as e:
             print(f"Error loading checkpoint: {e}")
             exit(1)
-            
+
         model.eval()
 
         if args.image:
@@ -105,18 +109,18 @@ if __name__ == "__main__":
             # Calculate BLEU score first
             print("\nCalculating BLEU score...")
             print_bleu_score(val_loader, model, dataset, config.DEVICE)
-            
+
             import random
             print(f"\nEvaluating on {args.num_samples} random examples from validation set...")
-            
+
             val_subset = val_loader.dataset
             indices = list(range(len(val_subset)))
             random.shuffle(indices)
             sample_indices = indices[:args.num_samples]
-            
+
             for i, idx in enumerate(sample_indices):
                 img, caption_tensor = val_subset[idx]
-                
+
                 # Convert target caption to text
                 target_caption = []
                 for token_idx in caption_tensor:
@@ -125,12 +129,12 @@ if __name__ == "__main__":
                         break
                     if word != "<SOS>" and word != "<PAD>":
                         target_caption.append(word)
-                
+
                 # Generate prediction
                 img_tensor = img.unsqueeze(0).to(config.DEVICE)
                 with torch.no_grad():
                     prediction = model.caption_image(img_tensor, dataset.vocab)
-                
+
                 print(f"\nExample {i+1}/{args.num_samples}")
                 print(f"Target:     {' '.join(target_caption)}")
                 print(f"Prediction: {' '.join(prediction)}")
