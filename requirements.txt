@@ -1,0 +1,13 @@
+torch
+torchvision
+fastapi
+uvicorn
+pillow
+pandas
+spacy
+tqdm
+matplotlib
+gTTS
+transformers
+python-multipart
+requests
