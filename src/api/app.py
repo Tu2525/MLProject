@@ -1,77 +1,171 @@
 import os
 import sys
-
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-from fastapi import FastAPI, UploadFile, File
+import torch
+import torchvision.transforms as transforms
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from PIL import Image
 import io
-import torch
 from src.models.model import CNNtoRNN
-from src.preprocessing.transforms import get_transforms, Vocabulary
+from src.data.dataset import Vocabulary
 from config.config import config
-import pandas as pd
-import time
-import logging
-
-# configure basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
 app = FastAPI(title="Image Captioning API")
 
-# Load model and vocabulary
-# Note: In a real production app, you'd load the vocab from a saved file (pickle/json)
-# Here we rebuild it from the captions file for simplicity, which is slow but works.
-print("Loading Vocabulary...")
-df = pd.read_csv(config.CAPTIONS_FILE)
-vocab = Vocabulary(config.FREQ_THRESHOLD)
-vocab.build_vocabulary(df["caption"].tolist())
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+# ...existing code...
+# Load model and vocab
+device = config.DEVICE
+checkpoint_path = config.MODEL_SAVE_PATH if os.path.exists(config.MODEL_SAVE_PATH) else config.CHECKPOINT_PATH
 
-print("Loading Model...")
-model = CNNtoRNN(
-    embed_size=config.EMBED_SIZE,
-    hidden_size=config.HIDDEN_SIZE,
-    vocab_size=len(vocab),
-    num_layers=config.NUM_LAYERS
-).to(config.DEVICE)
+if not os.path.exists(checkpoint_path):
+    # Fallback to root if not moved yet
+    root_best = os.path.join(config.ROOT_DIR, "best_model.pth")
+    root_checkpoint = os.path.join(config.ROOT_DIR, "checkpoint.pth")
+    checkpoint_path = root_best if os.path.exists(root_best) else root_checkpoint
 
-# Load weights if they exist
-try:
-    checkpoint = torch.load(config.MODEL_SAVE_PATH, map_location=config.DEVICE)
+if not os.path.exists(checkpoint_path):
+    print(f"Warning: Model checkpoint not found at {checkpoint_path}. API will start but /predict will fail.")
+    model = None
+    vocab = None
+else:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    itos = checkpoint["vocab_itos"]
+    vocab = Vocabulary(config.FREQ_THRESHOLD)
+    vocab.itos = {int(k): v for k, v in itos.items()}
+    vocab.stoi = {v: int(k) for k, v in vocab.itos.items()}
+
+    model = CNNtoRNN(
+        embed_size=config.EMBED_SIZE,
+        hidden_size=config.HIDDEN_SIZE,
+        vocab_size=len(vocab),
+        encoder_dim=512,
+        attention_dim=config.EMBED_SIZE,
+        device=device
+    ).to(device)
+
     model.load_state_dict(checkpoint["state_dict"])
-    print("Model loaded successfully.")
-except FileNotFoundError:
-    print("No model checkpoint found. Please train the model first.")
+    model.eval()
 
-model.eval()
-transform = get_transforms(config.IMAGE_SIZE)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 
 @app.post("/predict")
-async def predict_caption(file: UploadFile = File(...)):
-    start_ts = time.time()
-    image_data = await file.read()
-    file_size = len(image_data)
-    logging.info(f"Received file: filename={file.filename} size={file_size} bytes")
-
+async def predict(file: UploadFile = File(...)):
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
     try:
+        image_data = await file.read()
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
+        image = transform(image).to(device)
+        
+        caption = model.caption_image(image, vocab)
+        return {"caption": caption}
     except Exception as e:
-        logging.exception("Failed to open image")
-        return {"error": "Failed to open image. Make sure a valid image file is uploaded."}
+        raise HTTPException(status_code=500, detail=str(e))
 
-    image_tensor = transform(image).unsqueeze(0).to(config.DEVICE)
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Image Captioning</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+            .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 400px; text-align: center; }
+            #drop-area { border: 2px dashed #007bff; border-radius: 8px; padding: 2rem; cursor: pointer; transition: background 0.3s; margin-bottom: 1rem; }
+            #drop-area.highlight { background-color: #e7f3ff; }
+            #preview { max-width: 100%; max-height: 300px; margin-top: 1rem; display: none; border-radius: 4px; }
+            #result { margin-top: 1.5rem; font-weight: bold; color: #333; min-height: 1.5em; }
+            .loading { color: #666; font-style: italic; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Image Captioning</h1>
+            <div id="drop-area">
+                <p>Drag and drop an image here or click to select</p>
+                <input type="file" id="fileElem" accept="image/*" style="display:none" onchange="handleFiles(this.files)">
+            </div>
+            <img id="preview">
+            <div id="result"></div>
+        </div>
 
-    # Do not squeeze the batch dimension — caption_image expects a batched tensor
-    caption_tokens = model.caption_image(image_tensor, vocab)
-    caption_text = " ".join(caption_tokens)
+        <script>
+            let dropArea = document.getElementById('drop-area');
+            let resultDiv = document.getElementById('result');
+            let preview = document.getElementById('preview');
 
-    elapsed = time.time() - start_ts
-    logging.info(f"Processed file in {elapsed:.3f}s, caption_length={len(caption_tokens)}")
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
 
-    return {"caption": caption_text, "processing_time_s": round(elapsed, 3)}
+            function preventDefaults (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
 
-@app.get("/")
-def root():
-    return {"message": "Welcome to the Image Captioning API"}
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.add('highlight'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.remove('highlight'), false);
+            });
+
+            dropArea.addEventListener('drop', handleDrop, false);
+            dropArea.onclick = () => document.getElementById('fileElem').click();
+
+            function handleDrop(e) {
+                let dt = e.dataTransfer;
+                let files = dt.files;
+                handleFiles(files);
+            }
+
+            function handleFiles(files) {
+                if (files.length > 0) {
+                    uploadFile(files[0]);
+                    displayPreview(files[0]);
+                }
+            }
+
+            function displayPreview(file) {
+                let reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onloadend = function() {
+                    preview.src = reader.result;
+                    preview.style.display = 'block';
+                }
+            }
+
+            function uploadFile(file) {
+                resultDiv.innerHTML = '<span class="loading">Generating caption...</span>';
+                let formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.caption) {
+                        resultDiv.innerText = data.caption;
+                    } else {
+                        resultDiv.innerText = 'Error: ' + (data.detail || 'Unknown error');
+                    }
+                })
+                .catch(error => {
+                    console.error(error);
+                    resultDiv.innerText = 'Error uploading file';
+                });
+            }
+        </script>
+    </body>
+    </html>
+    """
+

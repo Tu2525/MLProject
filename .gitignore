@@ -8,12 +8,15 @@
 
 
 captions.txt
+captions8k.txt
+captions30k.txt
 
-
+*.pth
 __pycache__/
 **/__pycache__/
 
 /models
 /Images_Resized
+/flickr30k_resized
 
 .vscode
